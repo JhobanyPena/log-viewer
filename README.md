@@ -1,101 +1,93 @@
-# Blob Log Tailer
+# Blob Log Tailer (Chrome Extension)
 
-Extensión de Chrome para visualizar cómodamente archivos `.log` servidos directamente (p. ej. desde **Azure Blob Storage**). Añade **tail**, **auto-refresh** configurable, **filtro persistente**, **resaltado por contenido**, y una página de **Opciones** integrada en la misma vista.
+Visor mejorado para archivos `.log` servidos desde Azure Blob (o cualquier URL similar). Añade:
 
-> Probado con URLs tipo: `https://xxxxx.blob.core.windows.net/logs/QA_US500_2025-09-02.log`
+* **Siempre mostrar el final (tail)**
+* **Auto-refresh** configurable
+* **Filtro de búsqueda** que **no se borra** al actualizar
+* **Resaltado por contenido** configurable
+* **Opciones integradas** en un tab dentro del visor
+* **Navegación entre coincidencias** con botones ↑/↓ y contador actual/total
 
----
-
-## Características
-
-- **Tail**: muestra el final del archivo y, si activas *Seguir al final*, hace auto-scroll en cada actualización.
-- **Auto-refresh** configurable (segundos), persistente entre sesiones.
-- **Filtro de búsqueda** que **no se borra** al actualizar.
-- **Navegación por coincidencias**: flechas **↑/↓** para ir a la coincidencia anterior/siguiente + contador **actual/total**.
-- **Resaltado por contenido**: reglas configurables (texto o regex) con colores personalizados.
-- **Opciones integradas** en un **tab** dentro del visor (no hay página aparte).
-- **Eficiente**: usa `HEAD` y **HTTP Range** para pedir sólo lo nuevo cuando el servidor lo permite; si no, cae a `GET` completo con `cache-control: no-store`.
+> Funciona sobre páginas que muestran directamente el `.log` (por ejemplo: `https://xxxxx.blob.core.windows.net/logs/QA_US500_2025-09-02.log`).
 
 ---
 
-## Estructura del proyecto
+## Estructura de archivos
 
-- blob-log-tailer/
-  - manifest.json
-  - content.js
-  - content.css
-  - README.md
+```text
+/blob-log-tailer/
+  manifest.json
+  content.js
+  content.css
+  README.md
+```
 
 ---
 
 ## Instalación (modo desarrollador)
 
-1. Descarga o clona esta carpeta `blob-log-tailer/`.
-2. Abre `chrome://extensions`.
+1. Descarga estos archivos a una carpeta, por ejemplo `blob-log-tailer/`.
+2. Abre **chrome://extensions**.
 3. Activa **Developer mode** (arriba a la derecha).
 4. Haz clic en **Load unpacked** y selecciona la carpeta.
-5. Abre tu `.log` en el navegador. El visor aparecerá automáticamente en páginas cuya URL **termine en `.log`** (también funciona con querystring, p. ej. `.log?sv=...`).
+5. Abre tu log, p. ej. `https://xxxxx.blob.core.windows.net/logs/QA_US500_2025-09-02.log`.
+
+> Si no ves el visor, comprueba que la URL **termina en `.log`**. El script solo se activa en esos casos.
 
 ---
 
 ## Uso rápido
 
-### Tabs
-- **Visor**: lectura del log, búsqueda, auto-refresh, etc.
-- **Opciones**: gestor de reglas de **resaltado por contenido**. Al **Guardar**, se aplican inmediatamente.
+### Panel Visor
 
-### Controles (Visor)
-- **Actualización (s)**: intervalo de auto-refresh.
-- **Cola (KB)**: tamaño del *tail* inicial y tras rotaciones (cuántos KB del final se cargan).
-- **Seguir al final**: auto-scroll hacia el fondo tras cada actualización.
-- **Solo coincidencias**: si está activo, sólo se muestran líneas que cumplen el filtro.
-- **Filtro**: texto simple o `/regex/flags`.  
-  - Texto simple → búsqueda **case-insensitive** (`includes`).
-  - Regex → escribe `/patrón/flags`, p. ej. `/\[(ERROR|WARN)\]/i`.
-- **Navegación de búsqueda**:
-  - Botones **↑ / ↓** saltan entre coincidencias.
-  - El contador muestra **posición / total** (la coincidencia activa se resalta con borde más marcado).
-  - Al navegar se desactiva “Seguir al final” para no perder el foco del resultado.
+* **Actualización (s)**: intervalo de auto-refresh (persistente entre sesiones).
+* **Seguir al final**: si está activo, el visor hace *auto-scroll* al fondo tras cada actualización.
+* **Solo coincidencias**: si lo activas, solo verás las líneas que coinciden con el filtro.
+* **Filtro**: texto simple o regex (`/.../i`). Se mantiene entre actualizaciones.
+* **Navegación por coincidencias**:
 
-### Resaltado por contenido (tab Opciones)
-Cada regla tiene:
-- **Nombre** (descriptivo, no afecta la lógica).
-- **Patrón**: texto o **regex** (sin barras `/.../`).
-- **Flags** (si regex): por ejemplo `i` (ignorar may/min).
-- **CSS class** (opcional): útil si quieres estilos distintos por regla (p. ej. `hl-ejecucion`, `hl-error`).
-- **Color de fondo** y **Color de texto**.
+  * Botones **↑ / ↓** recorren los resultados.
+  * Contador muestra la coincidencia actual y el total.
+  * La coincidencia activa se resalta con borde más marcado.
+* **Pausar/Reanudar**: detiene o reanuda la recarga automática.
 
-> **Tip:** si dejas **CSS class** vacío en varias reglas, compartirán el mismo estilo y la última guardada podría sobrescribir colores de las anteriores.
+### Panel Opciones
 
-**Ejemplos de patrones:**
-- Texto literal: `ig_strategy: Ejecución de estrategia`
-- Regex de niveles: `\[(ERROR|WARN)\]` (flags: `i`)
-- Regex por hora: `^\d{4}-\d{2}-\d{2} 20:15:` (flags: vacío)
+* Gestiona las reglas de **resaltado por contenido**.
+* Cada regla define: **nombre**, **patrón** (texto o regex), **flags**, **clase CSS** (opcional) y **colores**.
+* Al guardar, se aplican inmediatamente en el visor.
 
 ---
 
 ## Notas técnicas
 
-- **Detección de `.log`**: el visor sólo se activa si la URL termina en `.log` (con o sin querystring).
-- **HEAD + Range**: si el servidor responde `Content-Length` y soporta `Range`, se solicitarán únicamente los bytes nuevos (`bytes=last-`).  
-  Si el archivo se acorta (rotación), se recarga la **cola** (últimos *N* KB).
-- **Fallback sin Range**: se usa `GET` completo con `cache-control: no-store`.
-- **Persistencia**: ajustes y reglas se guardan en `chrome.storage.sync`.
+* **Recarga completa**: en cada intervalo se vuelve a descargar el archivo completo, con un parámetro de *cache-buster* y `cache: no-store` para evitar respuestas cacheadas.
+* **Filtrado**:
+
+  * Texto simple → búsqueda case-insensitive con `includes()`.
+  * Regex → escribe `/patrón/flags`.
+* **Resaltado**: cada regla genera una clase CSS; puedes personalizar colores.
+* **Persistencia**: configuraciones y reglas se guardan en `chrome.storage.sync`.
 
 ---
 
-## Permisos y privacidad
+## Seguridad y permisos
 
-- `host_permissions`: `https://*.blob.core.windows.net/*` para poder leer el mismo `.log` desde el content script.
-- **Todo** el procesamiento se hace **localmente** en tu navegador. No se envían datos a ningún servicio externo.
+* **host\_permissions** incluye `https://*.blob.core.windows.net/*` para que el `content_script` pueda leer y volver a pedir el mismo `.log`.
+* Todo el procesamiento ocurre localmente en el navegador; no se envían datos fuera.
 
 ---
 
-## Solución de problemas
+## Ejemplo de regla de resaltado
 
-- **No aparece el visor**: verifica que la URL **termine en `.log`**. Ejemplos válidos:  
-  - `.../archivo.log`  
-  - `.../archivo.log?sv=...`  
-- **No “avanza” el tail**: el servidor podría no soportar `HEAD` o `Range`. Sube el valor de **Actualización (s)** o baja el **Cola (KB)** para reducir coste de red.
-- **Muchos datos / lentitud**: aumenta **Cola (KB)** para cargar menos en la primera pasada y confirma que “Solo coincidencias” esté desactivado si quieres ver todo.
-- **Colores no aplican como esperas**: asigna **CSS class** distinta por regla para aislar estilos.
+```json
+{
+  "name": "Ejecución de estrategia",
+  "pattern": "ig_strategy: Ejecución de estrategia",
+  "flags": "i",
+  "className": "hl-ejecucion",
+  "bgColor": "#fff1a8",
+  "textColor": "#111111"
+}
+```

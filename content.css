@@ -42,7 +42,7 @@
 .blt-tab.is-active { background: #202942; }
 
 /* Panels */
-.blt-panel { display: none; height: calc(100vh - 56px); /* header approx */ }
+.blt-panel { display: none; height: calc(100vh - 56px); }
 .blt-panel.is-active { display: grid; grid-template-rows: auto 1fr auto; }
 
 /* Toolbar / Controls / Search */

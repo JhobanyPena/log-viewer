@@ -2,10 +2,9 @@
   const isLog = () => /\.log(\?.*)?$/.test(location.pathname + location.search);
   if (!isLog()) return; // Solo actuar en ficheros .log
 
-  // ======= Config por defecto =======
+  // ======= Config por defecto (sin tailKB) =======
   const DEFAULTS = {
     refreshSeconds: 5,       // auto-refresh (segundos)
-    tailKB: 512,             // tamaño de cola inicial (KB)
     followTail: true,        // seguir al final
     onlyMatches: false,      // mostrar solo coincidencias
     filterText: "",          // filtro de búsqueda (persiste)
@@ -29,19 +28,59 @@
     chrome.storage.sync.set(patch, () => res());
   });
 
-  // ======= Estado =======
+  // ======= Estado (simplificado) =======
   const state = {
     settings: { ...DEFAULTS },
     timerId: null,
-    etag: null,
-    lastLength: null,   // Content-Length previo
-    rangeStart: 0,      // Siguiente byte a pedir (append)
-    buffer: "",         // Texto acumulado
+    buffer: "",
     paused: false,
     // Búsqueda
     hitNodes: [],
-    activeHitIdx: 0
+    activeHitIdx: 0,
+    sizeBytes: 0
   };
+
+  // ======= Utils =======
+  function $(id) { return document.getElementById(id); }
+
+  function escapeHtml(s) {
+    return s.replace(/[&<>\"']/g, c => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;"
+    }[c]));
+  }
+
+  function addCacheBuster(url) {
+    try {
+      const u = new URL(url);
+      u.searchParams.set('_ts', Date.now().toString());
+      return u.toString();
+    } catch {
+      return url + (url.includes('?') ? '&' : '?') + '_ts=' + Date.now();
+    }
+  }
+
+  function toRegex(input) {
+    if (!input) return null;
+    const m = input.match(/^\/(.*)\/([gimsuy]*)$/);
+    if (m) {
+      try { return new RegExp(m[1], m[2]); } catch { return null; }
+    }
+    return null; // texto simple -> includes()
+  }
+
+  function testFilter(line, re, raw) {
+    if (re) return re.test(line);
+    return line.toLowerCase().includes(raw.toLowerCase());
+  }
+
+  function textSizeBytes(str) {
+    // Estimar bytes reales para mostrar en status
+    try { return new TextEncoder().encode(str).length; } catch { return str.length; }
+  }
 
   // ======= UI =======
   function buildUI() {
@@ -71,9 +110,6 @@
           <div class="blt-controls">
             <label>Actualización (s)
               <input id="blt-refresh" type="number" min="1" step="1" />
-            </label>
-            <label>Cola (KB)
-              <input id="blt-tailkb" type="number" min="1" step="1" />
             </label>
             <label class="blt-checkbox">
               <input id="blt-follow" type="checkbox" /> Seguir al final
@@ -108,9 +144,9 @@
           <h2>Resaltado por contenido</h2>
           <ol>
             <li><strong>Nombre</strong>: texto descriptivo (no afecta la lógica).</li>
-            <li><strong>Patrón</strong>: texto literal o <em>regex</em> <strong>sin</strong> las barras <code>/.../</code>.</li>
+            <li><strong>Patrón</strong>: texto o <em>regex</em> <strong>sin</strong> las barras <code>/.../</code>.</li>
             <li><strong>Flags</strong> (si regex): ej. <code>i</code> para ignorar mayúsculas/minúsculas.</li>
-            <li><strong>CSS class</strong> (opcional): pon nombres distintos si quieres colores distintos por regla (p. ej. <code>hl-ejecucion</code>, <code>hl-error</code>).</li>
+            <li><strong>CSS class</strong> (opcional): usa nombres distintos si quieres estilos distintos por regla.</li>
             <li>Elige <strong>Color de fondo</strong> y <strong>Color de texto</strong>.</li>
             <li>Pulsa <strong>Guardar</strong>.</li>
           </ol>
@@ -145,14 +181,12 @@
 
     // Inicializa valores UI (VISOR)
     $("blt-refresh").value = state.settings.refreshSeconds;
-    $("blt-tailkb").value = state.settings.tailKB;
     $("blt-follow").checked = state.settings.followTail;
     $("blt-only").checked = state.settings.onlyMatches;
     $("blt-filter").value = state.settings.filterText;
 
     // Eventos VISOR
     $("blt-refresh").addEventListener("change", onRefreshChanged);
-    $("blt-tailkb").addEventListener("change", onTailChanged);
     $("blt-follow").addEventListener("change", onFollowChanged);
     $("blt-only").addEventListener("change", onOnlyChanged);
     $("blt-filter").addEventListener("input", onFilterChanged);
@@ -187,8 +221,7 @@
     buildUI();
     compileHighlightCSS(state.settings.highlightRules);
     startTimer();
-    // Carga inicial inmediata
-    refresh(true).catch(console.error);
+    refresh(true).catch(console.error); // Carga inicial
   }
 
   function startTimer() {
@@ -204,16 +237,6 @@
     saveSettings({ refreshSeconds: v });
     startTimer();
   }
-  function onTailChanged(e) {
-    const v = Math.max(1, Number(e.target.value || 512));
-    state.settings.tailKB = v;
-    saveSettings({ tailKB: v });
-    // Forzar recarga desde la cola
-    state.lastLength = null;
-    state.rangeStart = 0;
-    state.buffer = "";
-    refresh(true).catch(console.error);
-  }
   function onFollowChanged(e) {
     state.settings.followTail = !!e.target.checked;
     saveSettings({ followTail: state.settings.followTail });
@@ -222,14 +245,13 @@
   function onOnlyChanged(e) {
     state.settings.onlyMatches = !!e.target.checked;
     saveSettings({ onlyMatches: state.settings.onlyMatches });
-    // Al cambiar esta opción, recalculamos hits
     render();
   }
   function onFilterChanged(e) {
     state.settings.filterText = e.target.value || "";
     saveSettings({ filterText: state.settings.filterText });
-    state.activeHitIdx = 0; // reinicia navegación
-    render(/*scrollToActive*/true); // sitúa en la primera coincidencia si existe
+    state.activeHitIdx = 0;
+    render(true); // situar en la primera coincidencia si existe
   }
   function onTogglePause() {
     state.paused = !state.paused;
@@ -237,82 +259,26 @@
     $("blt-note").textContent = state.paused ? "⏸️ Pausado" : "";
   }
 
+  // ==== REFRESH simplificado: GET completo con cache-buster y no-store
   async function refresh(initial) {
-    const url = location.href;
+    const url = addCacheBuster(location.href);
+    const resp = await fetch(url, { method: "GET", cache: "no-store" });
+    const text = await resp.text();
 
-    // Intenta HEAD para Content-Length y ETag
-    let contentLength = null;
-    let etag = null;
-    try {
-      const head = await fetch(url, { method: "HEAD", cache: "no-store" });
-      etag = head.headers.get("etag");
-      const cl = head.headers.get("content-length");
-      contentLength = cl ? parseInt(cl, 10) : null;
-    } catch (e) {
-      // HEAD puede no estar permitido; seguimos sin él
+    const sizeHeader = resp.headers.get("content-length");
+    const size = sizeHeader ? parseInt(sizeHeader, 10) : textSizeBytes(text);
+
+    if (text === state.buffer && !initial) {
+      // Sin cambios reales
+      updateStatus(size, true);
+      return;
     }
 
-    // Decide qué pedir
-    let rangeHeader = null;
-    let cutFirstLine = false;
-
-    if (state.lastLength == null || initial) {
-      if (contentLength != null) {
-        const tailBytes = Math.max(1, state.settings.tailKB | 0) * 1024;
-        if (contentLength > tailBytes) {
-          state.rangeStart = contentLength - tailBytes;
-          rangeHeader = `bytes=${state.rangeStart}-`;
-          cutFirstLine = true; // puede empezar en mitad de línea
-        } else {
-          state.rangeStart = 0;
-        }
-      }
-    } else {
-      if (contentLength != null && contentLength > state.lastLength) {
-        state.rangeStart = state.lastLength;
-        rangeHeader = `bytes=${state.rangeStart}-`;
-      } else if (contentLength != null && contentLength < state.lastLength) {
-        // Archivo truncado/rotado -> volver a cargar desde cola
-        const tailBytes = Math.max(1, state.settings.tailKB | 0) * 1024;
-        if (contentLength > tailBytes) {
-          state.rangeStart = contentLength - tailBytes;
-          rangeHeader = `bytes=${state.rangeStart}-`;
-          cutFirstLine = true;
-        } else {
-          state.rangeStart = 0;
-        }
-      } else if (etag && state.etag && etag === state.etag) {
-        updateStatus(contentLength, true);
-        return; // sin cambios
-      }
-    }
-
-    // Realiza GET (con Range si aplica)
-    const headers = { "cache-control": "no-store" };
-    if (rangeHeader) headers["Range"] = rangeHeader;
-
-    const resp = await fetch(url, { method: "GET", headers });
-
-    let text = await resp.text();
-    if (rangeHeader && cutFirstLine) {
-      const i = text.indexOf("\n");
-      if (i !== -1) text = text.slice(i + 1);
-    }
-
-    if (rangeHeader && state.rangeStart > 0 && state.buffer) {
-      state.buffer += (state.buffer.endsWith("\n") || text.startsWith("\n")) ? text : ("\n" + text);
-    } else {
-      state.buffer = text;
-    }
-
-    // Actualiza métricas
-    state.etag = resp.headers.get("etag") || etag || null;
-    const cl2 = resp.headers.get("content-length");
-    if (contentLength != null) state.lastLength = contentLength;
-    else if (cl2 != null) state.lastLength = parseInt(cl2, 10);
+    state.buffer = text;
+    state.sizeBytes = size;
 
     render();
-    updateStatus(state.lastLength, false);
+    updateStatus(size, false);
   }
 
   function render(scrollToActive = false) {
@@ -328,10 +294,7 @@
     let html = "";
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
-      if (line === "" && !state.settings.onlyMatches) {
-        html += "\n";
-        continue;
-      }
+      if (line === "" && !state.settings.onlyMatches) { html += "\n"; continue; }
 
       const match = filter ? testFilter(line, re, filter) : true;
       if (state.settings.onlyMatches && !match) continue;
@@ -355,13 +318,11 @@
       return;
     }
 
-    // Ajusta índice actual si quedó fuera de rango
     if (state.activeHitIdx >= state.hitNodes.length) state.activeHitIdx = state.hitNodes.length - 1;
 
     $("blt-count").textContent = `${state.activeHitIdx + 1} / ${state.hitNodes.length}`;
     setNavEnabled(true);
 
-    // Marca la coincidencia activa
     state.hitNodes.forEach(n => n.classList.remove("blt-hit-current"));
     const activeNode = state.hitNodes[state.activeHitIdx];
     if (activeNode) {
@@ -371,13 +332,11 @@
       scrollToBottom();
     }
 
-    // Si followTail está activo y no estamos navegando por hits, baja al final
     if (!scrollToActive && state.settings.followTail) scrollToBottom();
   }
 
   function gotoHit(delta, scroll = true) {
     if (!state.hitNodes.length) return;
-    // Navegar cancela el followTail para que no se nos vaya al fondo
     if ($("blt-follow").checked) {
       $("blt-follow").checked = false;
       state.settings.followTail = false;
@@ -404,7 +363,7 @@
 
   function updateStatus(bytes, skipped) {
     const now = new Date();
-    $("blt-bytes").textContent = bytes != null ? `Tamaño: ${bytes.toLocaleString()} bytes` : "";
+    $("blt-bytes").textContent = `Tamaño: ${Number(bytes || 0).toLocaleString()} bytes`;
     $("blt-last").textContent = `Última actualización: ${now.toLocaleTimeString()}`;
     if (skipped) $("blt-note").textContent = "Sin cambios"; else if (!state.paused) $("blt-note").textContent = "";
   }
@@ -448,7 +407,6 @@
     const payload = { highlightRules: rules.length ? rules : DEFAULTS.highlightRules };
     await saveSettings(payload);
     state.settings.highlightRules = payload.highlightRules;
-    // Reinyecta CSS y vuelve a pintar
     removeDynamicCSS();
     compileHighlightCSS(state.settings.highlightRules);
     render();
@@ -463,33 +421,6 @@
     $("blt-tab-options").classList.toggle("is-active", !isView);
     $("blt-view").classList.toggle("is-active", isView);
     $("blt-options").classList.toggle("is-active", !isView);
-  }
-
-  // ======= Utils =======
-  function $(id) { return document.getElementById(id); }
-
-  function escapeHtml(s) {
-    return s.replace(/[&<>\"']/g, c => ({
-      "&": "&amp;",
-      "<": "&lt;",
-      ">": "&gt;",
-      '"': "&quot;",
-      "'": "&#39;"
-    }[c]));
-  }
-
-  function toRegex(input) {
-    if (!input) return null;
-    const m = input.match(/^\/(.*)\/([gimsuy]*)$/);
-    if (m) {
-      try { return new RegExp(m[1], m[2]); } catch { return null; }
-    }
-    return null; // texto simple -> includes()
-  }
-
-  function testFilter(line, re, raw) {
-    if (re) return re.test(line);
-    return line.toLowerCase().includes(raw.toLowerCase());
   }
 
   function compileHighlightCSS(rules) {
