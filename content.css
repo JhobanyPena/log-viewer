@@ -1,0 +1,64 @@
+ :root {
+  --blt-bg: #0b0f16;
+  --blt-panel: #121826;
+  --blt-muted: #91a1b5;
+  --blt-text: #e6edf3;
+  --blt-accent: #49a6ff;
+}
+
+#blt-root {
+  height: 100vh;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  background: var(--blt-bg);
+  color: var(--blt-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+.blt-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--blt-panel);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.05) inset;
+}
+
+.blt-left { display: flex; align-items: center; gap: 10px; }
+.blt-title { font-size: 14px; color: var(--blt-accent); }
+.blt-url { font-size: 12px; color: var(--blt-muted); max-width: 50vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.blt-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.blt-controls label { font-size: 12px; color: var(--blt-muted); display: flex; align-items: center; gap: 6px; }
+.blt-controls input[type="number"] { width: 80px; padding: 4px 6px; background:#0f1522; border:1px solid #2a3448; color:var(--blt-text); border-radius:8px; }
+.blt-controls input[type="text"] { width: 260px; padding: 6px 8px; background:#0f1522; border:1px solid #2a3448; color:var(--blt-text); border-radius:8px; }
+.blt-checkbox { gap: 6px; }
+
+.blt-btn { padding: 6px 10px; background:#1b2233; border:1px solid #2a3448; color:var(--blt-text); border-radius:10px; cursor:pointer; font-size:12px; text-decoration:none; }
+.blt-btn:hover { background:#202942; }
+
+.blt-log {
+  overflow: auto;
+  padding: 14px 16px;
+  line-height: 1.4;
+  white-space: pre; /* no wrap */
+  font-size: 12.5px;
+}
+
+.blt-line { padding: 0 6px; }
+.blt-hit { outline: 1px dashed rgba(73,166,255,.5); }
+
+/* Regla por defecto que aseguramos por JS para "Ejecución de estrategia" */
+.hl-ejecucion { background: #fff1a8; color: #111; border-left: 4px solid rgba(0,0,0,.2); }
+
+.blt-status {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--blt-muted);
+  background: #0f1522;
+  box-shadow: 0 -1px 0 rgba(255,255,255,0.05) inset;
+}

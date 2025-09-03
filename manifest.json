@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Blob Log Tailer",
+  "version": "1.0.0",
+  "description": "Tail para logs en Azure Blob: auto-refresh, filtro persistente y resaltado.",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://*.blob.core.windows.net/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://*.blob.core.windows.net/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "options_page": "options.html"
+}

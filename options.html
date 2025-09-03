@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Opciones · Blob Log Tailer</title>
+  <link rel="stylesheet" href="options.css" />
+</head>
+<body>
+  <main class="opt">
+    <h1>Blob Log Tailer · Opciones</h1>
+
+    <section>
+      <h2>Comportamiento</h2>
+      <label>Actualización (segundos)
+        <input id="refreshSeconds" type="number" min="1" step="1" />
+      </label>
+      <label>Tamaño de cola (KB)
+        <input id="tailKB" type="number" min="1" step="1" />
+      </label>
+      <label class="row">
+        <input id="followTail" type="checkbox" /> Seguir automáticamente el final
+      </label>
+      <label class="row">
+        <input id="onlyMatches" type="checkbox" /> Mostrar solo coincidencias del filtro
+      </label>
+    </section>
+
+    <section>
+      <h2>Resaltado por contenido</h2>
+      <p>Puedes añadir reglas. Usa <code>/regex/i</code> o texto simple. Ejemplo ya incluido para <code>ig_strategy: Ejecución de estrategia</code>.</p>
+      <div id="rules"></div>
+      <button id="addRule">Añadir regla</button>
+    </section>
+
+    <footer>
+      <button id="save">Guardar</button>
+      <span id="status"></span>
+    </footer>
+  </main>
+
+  <template id="ruleRow">
+    <div class="rule">
+      <input class="r-name" placeholder="Nombre" />
+      <input class="r-pattern" placeholder="patrón (texto o /regex/i)" />
+      <input class="r-flags" placeholder="flags (si regex)" />
+      <input class="r-class" placeholder="CSS class (opcional)" />
+      <input class="r-bg" type="color" value="#fff1a8" title="Fondo" />
+      <input class="r-fg" type="color" value="#111111" title="Texto" />
+      <button class="r-del">🗑</button>
+    </div>
+  </template>
+
+  <script src="options.js"></script>
+</body>
+</html>
