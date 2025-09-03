@@ -52,8 +52,6 @@ Visor mejorado para archivos `.log` servidos desde Azure Blob (o cualquier URL s
 * Cada regla define: **nombre**, **patrón** (texto o regex), **flags**, **clase CSS** (opcional) y **colores**.
 * Al guardar, se aplican inmediatamente en el visor.
 
----
-
 ## Notas técnicas
 
 * **Recarga completa**: en cada intervalo se vuelve a descargar el archivo completo, con un parámetro de *cache-buster* y `cache: no-store` para evitar respuestas cacheadas.
