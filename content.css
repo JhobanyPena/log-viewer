@@ -59,7 +59,7 @@
 .blt-controls input[type="number"] { width: 80px; padding: 4px 6px; background:#0f1522; border:1px solid #2a3448; color:var(--blt-text); border-radius:8px; }
 .blt-checkbox { gap: 6px; }
 
-.blt-search { display: flex; align-items: center; gap: 8px; }
+.blt-search { display: flex; align-items: center; gap: 8px; position: relative; }
 .blt-search input[type="text"] { width: 260px; padding: 6px 8px; background:#0f1522; border:1px solid #2a3448; color:var(--blt-text); border-radius:8px; }
 .blt-search-nav { display: flex; align-items: center; gap: 6px; }
 .blt-count { font-size: 12px; color: var(--blt-muted); }
@@ -135,3 +135,49 @@
   align-items: center;
 }
 .blt-opt-status { color: #49ffa6; font-size: 12px; }
+
+/* === Dropdown Historial === */
+.blt-history {
+  position: absolute;
+  top: 36px;             /* ajustar según alto del input */
+  left: 0;
+  width: 260px;          /* igual al ancho del input de filtro */
+  max-height: 240px;
+  overflow: auto;
+  background: #0f1522;
+  border: 1px solid #2a3448;
+  border-radius: 8px;
+  padding: 6px;
+  box-shadow: 0 6px 18px rgba(0,0,0,.35);
+  z-index: 30;
+}
+
+.blt-history-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 8px;
+  margin: 0 0 6px 0;
+  background: #1b2233;
+  border: 1px solid #2a3448;
+  border-radius: 6px;
+  color: var(--blt-text);
+  cursor: pointer;
+  font-size: 12px;
+}
+.blt-history-item:hover {
+  background: #202942;
+}
+
+.blt-history-clear {
+  display: block;
+  width: 100%;
+  padding: 6px 8px;
+  background: transparent;
+  border: 1px dashed #2a3448;
+  color: #aebad0;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.blt-history-clear:hover { background: #161c2b; }

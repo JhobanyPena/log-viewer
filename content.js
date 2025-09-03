@@ -8,6 +8,7 @@
     followTail: true,        // seguir al final
     onlyMatches: false,      // mostrar solo coincidencias
     filterText: "",          // filtro de búsqueda (persiste)
+    searchHistory: [],       // últimas 10 búsquedas
     highlightRules: [        // reglas de resaltado
       {
         name: "Ejecución de estrategia",
@@ -37,7 +38,7 @@
     // Búsqueda
     hitNodes: [],
     activeHitIdx: 0,
-    sizeBytes: 0
+    sizeBytes: 0,
   };
 
   // ======= Utils =======
@@ -78,7 +79,6 @@
   }
 
   function textSizeBytes(str) {
-    // Estimar bytes reales para mostrar en status
     try { return new TextEncoder().encode(str).length; } catch { return str.length; }
   }
 
@@ -120,6 +120,7 @@
           </div>
           <div class="blt-search">
             <input id="blt-filter" type="text" placeholder="Filtro: texto o /regex/i" />
+            <div id="blt-history" class="blt-history" hidden></div>
             <div class="blt-search-nav">
               <button id="blt-prev" class="blt-btn" title="Coincidencia anterior (Arriba)">↑</button>
               <button id="blt-next" class="blt-btn" title="Siguiente coincidencia (Abajo)">↓</button>
@@ -213,6 +214,39 @@
         saveSettings({ followTail: false });
       }
     });
+
+    // === Historial de búsquedas ===
+    const histEl = document.getElementById("blt-history");
+    const filterEl = document.getElementById("blt-filter");
+
+    // Mostrar historial al enfocar / hacer click si hay elementos
+    filterEl.addEventListener("focus", () => showHistoryDropdown());
+    filterEl.addEventListener("click", () => showHistoryDropdown());
+
+    // Guardar búsqueda al presionar Enter y aplicar filtro; Escape cierra
+    filterEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        const v = (filterEl.value || "").trim();
+        addToHistory(v);
+        filterEl.dispatchEvent(new Event("input", { bubbles: true }));
+        hideHistoryDropdown();
+      } else if (e.key === "Escape") {
+        hideHistoryDropdown();
+      }
+    });
+
+    // Guardar si el usuario abandona el campo con algo escrito
+    filterEl.addEventListener("blur", () => {
+      setTimeout(() => hideHistoryDropdown(), 120); // permite click en dropdown
+      const v = (filterEl.value || "").trim();
+      addToHistory(v);
+    });
+
+    // Cerrar si se hace click fuera
+    document.addEventListener("click", (e) => {
+      const wrap = document.querySelector(".blt-search");
+      if (!wrap.contains(e.target)) hideHistoryDropdown();
+    });
   }
 
   // ======= Lógica general =======
@@ -269,7 +303,6 @@
     const size = sizeHeader ? parseInt(sizeHeader, 10) : textSizeBytes(text);
 
     if (text === state.buffer && !initial) {
-      // Sin cambios reales
       updateStatus(size, true);
       return;
     }
@@ -440,6 +473,66 @@
   function removeDynamicCSS() {
     const el = document.getElementById("blt-dynamic-rules");
     if (el) el.remove();
+  }
+
+  // ===== Historial: helpers =====
+  function getHistory() {
+    return Array.isArray(state.settings.searchHistory) ? state.settings.searchHistory : [];
+  }
+
+  async function setHistory(arr) {
+    state.settings.searchHistory = arr;
+    await saveSettings({ searchHistory: arr });
+  }
+
+  // Añade (dedup + tope 10). Ignora vacío.
+  function addToHistory(term) {
+    const v = (term || "").trim();
+    if (!v) return;
+    let arr = getHistory();
+    arr = [v, ...arr.filter(x => x !== v)].slice(0, 10);
+    setHistory(arr);
+    renderHistoryDropdown(arr); // refresca si está abierto
+  }
+
+  function showHistoryDropdown() {
+    const arr = getHistory();
+    if (!arr.length) return hideHistoryDropdown();
+    renderHistoryDropdown(arr);
+    $("blt-history").hidden = false;
+  }
+
+  function hideHistoryDropdown() {
+    const el = $("blt-history");
+    if (el) el.hidden = true;
+  }
+
+  function renderHistoryDropdown(arr) {
+    const hist = $("blt-history");
+    if (!hist) return;
+    const html = arr.map((item, idx) =>
+      `<button type="button" class="blt-history-item" data-idx="${idx}" title="Usar búsqueda">${escapeHtml(item)}</button>`
+    ).join("") + `<button type="button" class="blt-history-clear" title="Borrar historial">Limpiar historial</button>`;
+    hist.innerHTML = html;
+
+    // Delegación de eventos (mousedown para no perder focus antes de tiempo)
+    hist.querySelectorAll(".blt-history-item").forEach(btn => {
+      btn.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        const value = btn.textContent;
+        const filter = $("blt-filter");
+        filter.value = value;
+        addToHistory(value); // lo sube a la cima
+        filter.dispatchEvent(new Event("input", { bubbles: true })); // aplica filtro
+        hideHistoryDropdown();
+      });
+    });
+
+    hist.querySelector(".blt-history-clear")?.addEventListener("mousedown", async (e) => {
+      e.preventDefault();
+      await setHistory([]);
+      hideHistoryDropdown();
+    });
   }
 
   // Go!
