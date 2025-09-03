@@ -10,26 +10,47 @@
   <main class="opt">
     <h1>Blob Log Tailer · Opciones</h1>
 
+    <!-- Documentación integrada (simple) -->
+    <section class="doc">
+      <h2>¿Cómo crear una regla de resaltado?</h2>
+      <ol>
+        <li><strong>Nombre</strong>: solo descriptivo (para ti).</li>
+        <li><strong>Patrón</strong>: texto literal <em>o</em> expresión regular <strong>sin</strong> las barras <code>/.../</code>.</li>
+        <li><strong>Flags</strong> (si usas regex): ej. <code>i</code> para ignorar mayúsculas/minúsculas.</li>
+        <li><strong>CSS class</strong> (opcional): si quieres colores distintos por regla, usa nombres de clase distintos (p. ej. <code>hl-ejecucion</code>, <code>hl-error</code>).</li>
+        <li>Elige <strong>color de fondo</strong> y <strong>color de texto</strong> para esa regla.</li>
+        <li>Haz clic en <strong>Guardar</strong>.</li>
+      </ol>
+      <p class="note">
+        <strong>Tip:</strong> si dejas <em>CSS class</em> vacío en varias reglas, compartirán el mismo estilo y la última guardada podría sobrescribir colores de las anteriores.
+      </p>
+    </section>
+
+    <!-- Ajustes generales -->
     <section>
       <h2>Comportamiento</h2>
-      <label>Actualización (segundos)
+      <label title="Cada cuántos segundos se recarga el log">
+        Actualización (segundos)
         <input id="refreshSeconds" type="number" min="1" step="1" />
       </label>
-      <label>Tamaño de cola (KB)
+      <label title="Cuántos KB del final se traen al iniciar o tras rotación del log">
+        Tamaño de cola (KB)
         <input id="tailKB" type="number" min="1" step="1" />
       </label>
-      <label class="row">
+      <label class="row" title="Si está activo, el visor se desplaza al final tras cada actualización">
         <input id="followTail" type="checkbox" /> Seguir automáticamente el final
       </label>
-      <label class="row">
+      <label class="row" title="Si está activo, solo verás líneas que coincidan con el filtro del visor">
         <input id="onlyMatches" type="checkbox" /> Mostrar solo coincidencias del filtro
       </label>
     </section>
 
+    <!-- Reglas -->
     <section>
       <h2>Resaltado por contenido</h2>
-      <p>Puedes añadir reglas. Usa <code>/regex/i</code> o texto simple. Ejemplo ya incluido para <code>ig_strategy: Ejecución de estrategia</code>.</p>
+      <p>Puedes añadir reglas. <strong>Patrón</strong> admite texto o <em>regex</em> (sin las barras <code>/</code>). Escribe las <strong>flags</strong> aparte (p. ej. <code>i</code>).</p>
       <div id="rules"></div>
+      <br/>
       <button id="addRule">Añadir regla</button>
     </section>
 
@@ -40,14 +61,14 @@
   </main>
 
   <template id="ruleRow">
-    <div class="rule">
-      <input class="r-name" placeholder="Nombre" />
-      <input class="r-pattern" placeholder="patrón (texto o /regex/i)" />
-      <input class="r-flags" placeholder="flags (si regex)" />
-      <input class="r-class" placeholder="CSS class (opcional)" />
-      <input class="r-bg" type="color" value="#fff1a8" title="Fondo" />
-      <input class="r-fg" type="color" value="#111111" title="Texto" />
-      <button class="r-del">🗑</button>
+    <div class="rule" title="Define una regla de resaltado">
+      <input class="r-name" placeholder="Nombre (ej.: Ejecución de estrategia)" />
+      <input class="r-pattern" placeholder="Patrón (texto o \[(ERROR|WARN)\])" />
+      <input class="r-flags" placeholder="Flags (ej.: i)" />
+      <input class="r-class" placeholder="CSS class (ej.: hl-ejecucion)" />
+      <input class="r-bg" type="color" value="#fff1a8" title="Color de fondo" />
+      <input class="r-fg" type="color" value="#111111" title="Color de texto" />
+      <button class="r-del" title="Eliminar">🗑</button>
     </div>
   </template>
 
