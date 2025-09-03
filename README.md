@@ -11,8 +11,6 @@ Visor mejorado para archivos `.log` servidos desde Azure Blob (o cualquier URL s
 
 > Funciona sobre páginas que muestran directamente el `.log` (por ejemplo: `https://xxxxx.blob.core.windows.net/logs/QA_US500_2025-09-02.log`).
 
----
-
 ## Estructura de archivos
 
 ```text
@@ -23,8 +21,6 @@ Visor mejorado para archivos `.log` servidos desde Azure Blob (o cualquier URL s
   README.md
 ```
 
----
-
 ## Instalación (modo desarrollador)
 
 1. Descarga estos archivos a una carpeta, por ejemplo `blob-log-tailer/`.
@@ -34,8 +30,6 @@ Visor mejorado para archivos `.log` servidos desde Azure Blob (o cualquier URL s
 5. Abre tu log, p. ej. `https://xxxxx.blob.core.windows.net/logs/QA_US500_2025-09-02.log`.
 
 > Si no ves el visor, comprueba que la URL **termina en `.log`**. El script solo se activa en esos casos.
-
----
 
 ## Uso rápido
 
@@ -70,14 +64,10 @@ Visor mejorado para archivos `.log` servidos desde Azure Blob (o cualquier URL s
 * **Resaltado**: cada regla genera una clase CSS; puedes personalizar colores.
 * **Persistencia**: configuraciones y reglas se guardan en `chrome.storage.sync`.
 
----
-
 ## Seguridad y permisos
 
 * **host\_permissions** incluye `https://*.blob.core.windows.net/*` para que el `content_script` pueda leer y volver a pedir el mismo `.log`.
 * Todo el procesamiento ocurre localmente en el navegador; no se envían datos fuera.
-
----
 
 ## Ejemplo de regla de resaltado
 
