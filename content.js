@@ -39,6 +39,9 @@
     hitNodes: [],
     activeHitIdx: 0,
     sizeBytes: 0,
+    // Nuevos campos para tracking de cambios
+    lastEtag: null,
+    lastModified: null,
   };
 
   // ======= Utils =======
@@ -293,25 +296,81 @@
     $("blt-note").textContent = state.paused ? "⏸️ Pausado" : "";
   }
 
-  // ==== REFRESH simplificado: GET completo con cache-buster y no-store
+  // ==== REFRESH optimizado: HEAD primero, luego GET si hay cambios
   async function refresh(initial) {
     const url = addCacheBuster(location.href);
-    const resp = await fetch(url, { method: "GET", cache: "no-store" });
-    const text = await resp.text();
-
-    const sizeHeader = resp.headers.get("content-length");
-    const size = sizeHeader ? parseInt(sizeHeader, 10) : textSizeBytes(text);
-
-    if (text === state.buffer && !initial) {
-      updateStatus(size, true);
-      return;
+    
+    // Si no es inicial, intentar verificar primero con HEAD
+    if (!initial && (state.lastEtag || state.lastModified)) {
+      try {
+        const headResp = await fetch(url, { 
+          method: "HEAD", 
+          cache: "no-store" 
+        });
+        
+        // Verificar si la respuesta es exitosa
+        if (headResp.ok) {
+          const currentEtag = headResp.headers.get("etag");
+          const currentModified = headResp.headers.get("last-modified");
+          
+          // Si no hay cambios, actualizar status y salir
+          if ((currentEtag && currentEtag === state.lastEtag) || 
+              (currentModified && currentModified === state.lastModified)) {
+            const sizeHeader = headResp.headers.get("content-length");
+            const size = sizeHeader ? parseInt(sizeHeader, 10) : state.sizeBytes;
+            updateStatus(size, true);
+            return;
+          }
+        } else {
+          // Si HEAD no está permitido (405) o cualquier otro error, continuar con GET
+          console.info(`HEAD request returned ${headResp.status}, falling back to GET`);
+        }
+      } catch (err) {
+        // Error de red u otro error, continuar con GET
+        console.info("HEAD request failed, using GET:", err.message);
+      }
     }
-
-    state.buffer = text;
-    state.sizeBytes = size;
-
-    render();
-    updateStatus(size, false);
+    
+    // Hacer GET completo si es inicial, si hay cambios, o si HEAD falló
+    try {
+      const resp = await fetch(url, { 
+        method: "GET", 
+        cache: "no-store" 
+      });
+      
+      if (!resp.ok) {
+        throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+      }
+      
+      const text = await resp.text();
+      
+      // Guardar nuevos valores de ETag y Last-Modified
+      const newEtag = resp.headers.get("etag");
+      const newModified = resp.headers.get("last-modified");
+      
+      // Solo actualizar si tenemos valores nuevos
+      if (newEtag) state.lastEtag = newEtag;
+      if (newModified) state.lastModified = newModified;
+      
+      const sizeHeader = resp.headers.get("content-length");
+      const size = sizeHeader ? parseInt(sizeHeader, 10) : textSizeBytes(text);
+      
+      // Si el contenido no cambió, actualizar status pero no re-renderizar
+      if (text === state.buffer && !initial) {
+        updateStatus(size, true);
+        return;
+      }
+      
+      state.buffer = text;
+      state.sizeBytes = size;
+      
+      render();
+      updateStatus(size, false);
+      
+    } catch (err) {
+      console.error("Failed to fetch log:", err);
+      $("blt-note").textContent = `⚠️ Error: ${err.message}`;
+    }
   }
 
   function render(scrollToActive = false) {
@@ -398,7 +457,11 @@
     const now = new Date();
     $("blt-bytes").textContent = `Tamaño: ${Number(bytes || 0).toLocaleString()} bytes`;
     $("blt-last").textContent = `Última actualización: ${now.toLocaleTimeString()}`;
-    if (skipped) $("blt-note").textContent = "Sin cambios"; else if (!state.paused) $("blt-note").textContent = "";
+    if (skipped) {
+      $("blt-note").textContent = "Sin cambios";
+    } else if (!state.paused) {
+      $("blt-note").textContent = "";
+    }
   }
 
   function scrollToBottom() {
