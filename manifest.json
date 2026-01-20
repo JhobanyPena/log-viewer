@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Blob Log Tailer",
-  "version": "1.4.0",
-  "description": "Visor de logs en Azure Blob con auto-refresh, filtros, resaltado y optimización de descarga.",
+  "version": "1.5.0",
+  "description": "Visor de logs en Azure Blob con auto-refresh, filtros avanzados, historial de búsquedas, resaltado inteligente y optimización de descargas.",
   "permissions": [
     "storage"
   ],

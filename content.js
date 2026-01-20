@@ -2,7 +2,7 @@
   const isLog = () => /\.log(\?.*)?$/.test(location.pathname + location.search);
   if (!isLog()) return; // Solo actuar en ficheros .log
 
-  // ======= Config por defecto (sin tailKB) =======
+  // ======= Config por defecto =======
   const DEFAULTS = {
     refreshSeconds: 5,       // auto-refresh (segundos)
     followTail: true,        // seguir al final
@@ -18,7 +18,7 @@
         textColor: "#111",
         bgColor: "#fff1a8"
       }
-    ]
+    ],
   };
 
   // Storage helpers
@@ -29,25 +29,32 @@
     chrome.storage.sync.set(patch, () => res());
   });
 
-  // ======= Estado (simplificado) =======
+  // ======= Estado =======
   const state = {
     settings: { ...DEFAULTS },
     timerId: null,
     buffer: "",
     paused: false,
+
     // Búsqueda
     hitNodes: [],
     activeHitIdx: 0,
     sizeBytes: 0,
-    // Nuevos campos para tracking de cambios
+
+    // Cache/condicional
     lastEtag: null,
     lastModified: null,
+
+    // Concurrencia
+    inFlight: false,
+    abort: null,
   };
 
   // ======= Utils =======
   function $(id) { return document.getElementById(id); }
 
   function escapeHtml(s) {
+    s = (s ?? "").toString();
     return s.replace(/[&<>\"']/g, c => ({
       "&": "&amp;",
       "<": "&lt;",
@@ -55,16 +62,6 @@
       '"': "&quot;",
       "'": "&#39;"
     }[c]));
-  }
-
-  function addCacheBuster(url) {
-    try {
-      const u = new URL(url);
-      u.searchParams.set('_ts', Date.now().toString());
-      return u.toString();
-    } catch {
-      return url + (url.includes('?') ? '&' : '?') + '_ts=' + Date.now();
-    }
   }
 
   function toRegex(input) {
@@ -77,12 +74,32 @@
   }
 
   function testFilter(line, re, raw) {
-    if (re) return re.test(line);
+    if (re) {
+      // Si tiene flag g, test() mueve lastIndex y rompe en loops
+      if (re.global) re.lastIndex = 0;
+      return re.test(line);
+    }
     return line.toLowerCase().includes(raw.toLowerCase());
   }
 
   function textSizeBytes(str) {
-    try { return new TextEncoder().encode(str).length; } catch { return str.length; }
+    try { return new TextEncoder().encode(str).length; } catch { return (str ?? "").length; }
+  }
+
+  // Compila reglas de highlight con seguridad (regex inválida no rompe render)
+  function compileRules(rules) {
+    const out = [];
+    for (const r of (rules || [])) {
+      const pattern = (r.pattern || "").trim();
+      if (!pattern) continue;
+      try {
+        const re = new RegExp(pattern, r.flags || "");
+        out.push({ re, className: r.className || "hl-custom" });
+      } catch {
+        // Regla inválida -> se ignora
+      }
+    }
+    return out;
   }
 
   // ======= UI =======
@@ -219,14 +236,11 @@
     });
 
     // === Historial de búsquedas ===
-    const histEl = document.getElementById("blt-history");
-    const filterEl = document.getElementById("blt-filter");
+    const filterEl = $("blt-filter");
 
-    // Mostrar historial al enfocar / hacer click si hay elementos
     filterEl.addEventListener("focus", () => showHistoryDropdown());
     filterEl.addEventListener("click", () => showHistoryDropdown());
 
-    // Guardar búsqueda al presionar Enter y aplicar filtro; Escape cierra
     filterEl.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
         const v = (filterEl.value || "").trim();
@@ -238,41 +252,74 @@
       }
     });
 
-    // Guardar si el usuario abandona el campo con algo escrito
     filterEl.addEventListener("blur", () => {
-      setTimeout(() => hideHistoryDropdown(), 120); // permite click en dropdown
+      setTimeout(() => hideHistoryDropdown(), 120);
       const v = (filterEl.value || "").trim();
       addToHistory(v);
     });
 
-    // Cerrar si se hace click fuera
     document.addEventListener("click", (e) => {
       const wrap = document.querySelector(".blt-search");
-      if (!wrap.contains(e.target)) hideHistoryDropdown();
+      if (wrap && !wrap.contains(e.target)) hideHistoryDropdown();
     });
   }
 
   // ======= Lógica general =======
   async function init() {
     state.settings = await getSettings();
+
+    // 1) Aprovecha lo que ya cargó el navegador (evita segunda descarga inicial en muchos casos)
+    try {
+      const preloaded = (document.body && document.body.innerText) ? document.body.innerText : "";
+      if (preloaded && preloaded.trim()) {
+        state.buffer = preloaded;
+        state.sizeBytes = textSizeBytes(preloaded);
+        // Si el server te envió ETag/Last-Modified en navegación normal, no los tenemos aquí.
+        // Igual el próximo refresh hará condicional si luego los obtenemos.
+      }
+    } catch {}
+
     buildUI();
     compileHighlightCSS(state.settings.highlightRules);
-    startTimer();
-    refresh(true).catch(console.error); // Carga inicial
+
+    render();
+    startTimerLoop();
+
+    // Sembrar Last-Modified del documento (para que el primer refresh sea condicional)
+    try {
+      const lm = document.lastModified; // ej "11/14/2025 11:55:20 PM"
+      if (lm && lm !== "01/01/1970 00:00:00") {
+        const d = new Date(lm);
+        if (!isNaN(d.getTime())) state.lastModified = d.toUTCString();
+      }
+    } catch {}
+
+    // NO hagas refresh(true) inmediato: evita el segundo GET completo
+    // Si quieres forzar una revalidación rápida, puedes hacer un refresh(false) en 1s:
+    setTimeout(() => refresh(false).catch(console.error), 1000);
   }
 
-  function startTimer() {
-    if (state.timerId) clearInterval(state.timerId);
-    state.timerId = setInterval(() => {
-      if (!state.paused) refresh(false).catch(console.error);
-    }, Math.max(1, Number(state.settings.refreshSeconds)) * 1000);
+  // Loop con setTimeout + await: jamás se encolan refresh
+  function startTimerLoop() {
+    if (state.timerId) clearTimeout(state.timerId);
+
+    const tick = async () => {
+      if (!state.paused) {
+        await refresh(false).catch(console.error);
+      }
+      const ms = Math.max(1, Number(state.settings.refreshSeconds)) * 1000;
+      state.timerId = setTimeout(tick, ms);
+    };
+
+    const firstMs = Math.max(1, Number(state.settings.refreshSeconds)) * 1000;
+    state.timerId = setTimeout(tick, firstMs);
   }
 
   function onRefreshChanged(e) {
     const v = Math.max(1, Number(e.target.value || 5));
     state.settings.refreshSeconds = v;
     saveSettings({ refreshSeconds: v });
-    startTimer();
+    startTimerLoop();
   }
   function onFollowChanged(e) {
     state.settings.followTail = !!e.target.checked;
@@ -288,7 +335,7 @@
     state.settings.filterText = e.target.value || "";
     saveSettings({ filterText: state.settings.filterText });
     state.activeHitIdx = 0;
-    render(true); // situar en la primera coincidencia si existe
+    render(true);
   }
   function onTogglePause() {
     state.paused = !state.paused;
@@ -296,80 +343,76 @@
     $("blt-note").textContent = state.paused ? "⏸️ Pausado" : "";
   }
 
-  // ==== REFRESH optimizado: HEAD primero, luego GET si hay cambios
+  // ===== Refresh: GET condicional (ETag/Last-Modified) + sin solapes =====
   async function refresh(initial) {
-    const url = addCacheBuster(location.href);
-    
-    // Si no es inicial, intentar verificar primero con HEAD
-    if (!initial && (state.lastEtag || state.lastModified)) {
-      try {
-        const headResp = await fetch(url, { 
-          method: "HEAD", 
-          cache: "no-store" 
-        });
-        
-        // Verificar si la respuesta es exitosa
-        if (headResp.ok) {
-          const currentEtag = headResp.headers.get("etag");
-          const currentModified = headResp.headers.get("last-modified");
-          
-          // Si no hay cambios, actualizar status y salir
-          if ((currentEtag && currentEtag === state.lastEtag) || 
-              (currentModified && currentModified === state.lastModified)) {
-            const sizeHeader = headResp.headers.get("content-length");
-            const size = sizeHeader ? parseInt(sizeHeader, 10) : state.sizeBytes;
-            updateStatus(size, true);
-            return;
-          }
-        } else {
-          // Si HEAD no está permitido (405) o cualquier otro error, continuar con GET
-          console.info(`HEAD request returned ${headResp.status}, falling back to GET`);
-        }
-      } catch (err) {
-        // Error de red u otro error, continuar con GET
-        console.info("HEAD request failed, using GET:", err.message);
-      }
+    // Evita concurrencia
+    if (state.inFlight) {
+      // No encolamos: simplemente ignoramos (el loop ya volverá a intentar)
+      return;
     }
-    
-    // Hacer GET completo si es inicial, si hay cambios, o si HEAD falló
+    state.inFlight = true;
+
+    // Cancela cualquier request anterior (por si se llama manualmente en el futuro)
+    state.abort?.abort();
+    const ac = new AbortController();
+    state.abort = ac;
+
     try {
-      const resp = await fetch(url, { 
-        method: "GET", 
-        cache: "no-store" 
+      $("blt-note").textContent = state.paused ? "⏸️ Pausado" : "Actualizando…";
+
+      const headers = {};
+      if (state.lastEtag) {
+        headers["If-None-Match"] = state.lastEtag;
+      } else if (state.lastModified) {
+        headers["If-Modified-Since"] = state.lastModified;
+      }
+
+      const resp = await fetch(location.href, {
+        method: "GET",
+        cache: "no-cache",          // permite revalidación; mejor que no-store
+        headers,
+        signal: ac.signal,
       });
-      
+
+      // Si el servidor soporta condicional, esto es la gloria:
+      if (resp.status === 304) {
+        updateStatus(state.sizeBytes, true);
+        return;
+      }
+
       if (!resp.ok) {
         throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
       }
-      
+
       const text = await resp.text();
-      
-      // Guardar nuevos valores de ETag y Last-Modified
+
+      // Guarda ETag/Last-Modified si existen
       const newEtag = resp.headers.get("etag");
       const newModified = resp.headers.get("last-modified");
-      
-      // Solo actualizar si tenemos valores nuevos
       if (newEtag) state.lastEtag = newEtag;
       if (newModified) state.lastModified = newModified;
-      
+
       const sizeHeader = resp.headers.get("content-length");
       const size = sizeHeader ? parseInt(sizeHeader, 10) : textSizeBytes(text);
-      
-      // Si el contenido no cambió, actualizar status pero no re-renderizar
-      if (text === state.buffer && !initial) {
+
+      // Si no cambió, no re-render
+      if (!initial && text === state.buffer) {
+        state.sizeBytes = size;
         updateStatus(size, true);
         return;
       }
-      
+
       state.buffer = text;
       state.sizeBytes = size;
-      
+
       render();
       updateStatus(size, false);
-      
     } catch (err) {
+      if (err?.name === "AbortError") return;
       console.error("Failed to fetch log:", err);
       $("blt-note").textContent = `⚠️ Error: ${err.message}`;
+    } finally {
+      state.inFlight = false;
     }
   }
 
@@ -377,13 +420,11 @@
     const logEl = $("blt-log");
     const filter = state.settings.filterText.trim();
     const re = toRegex(filter);
-    const rules = (state.settings.highlightRules || []).map(r => ({
-      re: new RegExp(r.pattern, r.flags || ""),
-      className: r.className || "hl-custom"
-    }));
+    const rules = compileRules(state.settings.highlightRules);
 
-    const lines = state.buffer.split(/\r?\n/);
+    let lines = (state.buffer || "").split(/\r?\n/);
     let html = "";
+
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       if (line === "" && !state.settings.onlyMatches) { html += "\n"; continue; }
@@ -392,7 +433,12 @@
       if (state.settings.onlyMatches && !match) continue;
 
       let cls = "blt-line";
-      for (const rr of rules) if (rr.re.test(line)) cls += ` ${rr.className}`;
+
+      for (const rr of rules) {
+        if (rr.re.global) rr.re.lastIndex = 0;
+        if (rr.re.test(line)) cls += ` ${rr.className}`;
+      }
+
       if (filter && match) cls += " blt-hit";
 
       html += `<div id="blt-line-${i}" class="${cls}">${escapeHtml(line)}</div>`;
@@ -457,9 +503,11 @@
     const now = new Date();
     $("blt-bytes").textContent = `Tamaño: ${Number(bytes || 0).toLocaleString()} bytes`;
     $("blt-last").textContent = `Última actualización: ${now.toLocaleTimeString()}`;
-    if (skipped) {
+    if (state.paused) {
+      $("blt-note").textContent = "⏸️ Pausado";
+    } else if (skipped) {
       $("blt-note").textContent = "Sin cambios";
-    } else if (!state.paused) {
+    } else {
       $("blt-note").textContent = "";
     }
   }
@@ -506,6 +554,7 @@
     removeDynamicCSS();
     compileHighlightCSS(state.settings.highlightRules);
     render();
+
     const st = $("blt-opt-status");
     st.textContent = "Guardado ✓";
     setTimeout(() => st.textContent = "", 1500);
@@ -523,7 +572,7 @@
     const style = document.createElement("style");
     style.id = "blt-dynamic-rules";
     let css = "";
-    for (const r of rules) {
+    for (const r of (rules || [])) {
       const cls = r.className || "hl-custom";
       const bg = r.bgColor || "#fff1a8";
       const fg = r.textColor || "#111";
@@ -548,14 +597,13 @@
     await saveSettings({ searchHistory: arr });
   }
 
-  // Añade (dedup + tope 10). Ignora vacío.
   function addToHistory(term) {
     const v = (term || "").trim();
     if (!v) return;
     let arr = getHistory();
     arr = [v, ...arr.filter(x => x !== v)].slice(0, 10);
     setHistory(arr);
-    renderHistoryDropdown(arr); // refresca si está abierto
+    renderHistoryDropdown(arr);
   }
 
   function showHistoryDropdown() {
@@ -578,15 +626,14 @@
     ).join("") + `<button type="button" class="blt-history-clear" title="Borrar historial">Limpiar historial</button>`;
     hist.innerHTML = html;
 
-    // Delegación de eventos (mousedown para no perder focus antes de tiempo)
     hist.querySelectorAll(".blt-history-item").forEach(btn => {
       btn.addEventListener("mousedown", (e) => {
         e.preventDefault();
         const value = btn.textContent;
         const filter = $("blt-filter");
         filter.value = value;
-        addToHistory(value); // lo sube a la cima
-        filter.dispatchEvent(new Event("input", { bubbles: true })); // aplica filtro
+        addToHistory(value);
+        filter.dispatchEvent(new Event("input", { bubbles: true }));
         hideHistoryDropdown();
       });
     });
