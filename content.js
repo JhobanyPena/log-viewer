@@ -285,17 +285,14 @@
     render();
     startTimerLoop();
 
-    // Sembrar Last-Modified del documento (para que el primer refresh sea condicional)
+    // Sembrar lastModified usando el documento ya cargado (para que el 1er refresh sea condicional)
     try {
-      const lm = document.lastModified; // ej "11/14/2025 11:55:20 PM"
-      if (lm && lm !== "01/01/1970 00:00:00") {
-        const d = new Date(lm);
-        if (!isNaN(d.getTime())) state.lastModified = d.toUTCString();
-      }
+      const lm = document.lastModified;
+      const d = new Date(lm);
+      if (!isNaN(d.getTime())) state.lastModified = d.toUTCString();
     } catch {}
 
-    // NO hagas refresh(true) inmediato: evita el segundo GET completo
-    // Si quieres forzar una revalidación rápida, puedes hacer un refresh(false) en 1s:
+    // Opcional: revalidar rápido en 1s (debería ser 304)
     setTimeout(() => refresh(false).catch(console.error), 1000);
   }
 
@@ -304,9 +301,7 @@
     if (state.timerId) clearTimeout(state.timerId);
 
     const tick = async () => {
-      if (!state.paused) {
-        await refresh(false).catch(console.error);
-      }
+      if (!state.paused) await refresh(false).catch(console.error);
       const ms = Math.max(1, Number(state.settings.refreshSeconds)) * 1000;
       state.timerId = setTimeout(tick, ms);
     };
