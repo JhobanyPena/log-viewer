@@ -21,9 +21,14 @@
         bgColor: "#d95f73"
       },
       {
-        pattern: "Opening LONG",
+        pattern: "Opening",
         textColor: "#111",
-        bgColor: "#6abe64"
+        bgColor: "#5f7bce"
+      },
+      {
+        pattern: "Take Profit",
+        textColor: "#111",
+        bgColor: "#7dbf78"
       }
     ],
   };
