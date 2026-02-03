@@ -11,12 +11,19 @@
     searchHistory: [],       // últimas 10 búsquedas
     highlightRules: [        // reglas de resaltado
       {
-        name: "Ejecución de estrategia",
-        pattern: "ig_strategy: Ejecución de estrategia",
-        flags: "i",
-        className: "hl-ejecucion",
+        pattern: "Ejecución de estrategia",
         textColor: "#111",
         bgColor: "#fff1a8"
+      },
+      {
+        pattern: "Stop Loss",
+        textColor: "#111",
+        bgColor: "#d95f73"
+      },
+      {
+        pattern: "Opening LONG",
+        textColor: "#111",
+        bgColor: "#6abe64"
       }
     ],
   };
@@ -92,9 +99,21 @@
     for (const r of (rules || [])) {
       const pattern = (r.pattern || "").trim();
       if (!pattern) continue;
+      
+      // Detectar si es regex o texto plano
+      const regexMatch = pattern.match(/^\/(.*)\/([gimsuy]*)$/);
+      
       try {
-        const re = new RegExp(pattern, r.flags || "");
-        out.push({ re, className: r.className || "hl-custom" });
+        if (regexMatch) {
+          // Es una regex
+          const re = new RegExp(regexMatch[1], regexMatch[2] || "");
+          out.push({ re, className: `hl-rule-${out.length}` });
+        } else {
+          // Es texto plano - crear regex que busque el texto literal
+          const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const re = new RegExp(escaped, "i");
+          out.push({ re, className: `hl-rule-${out.length}` });
+        }
       } catch {
         // Regla inválida -> se ignora
       }
@@ -163,37 +182,32 @@
       <section id="blt-options" class="blt-panel">
         <div class="blt-opt-doc">
           <h2>Resaltado por contenido</h2>
-          <ol>
-            <li><strong>Nombre</strong>: texto descriptivo (no afecta la lógica).</li>
-            <li><strong>Patrón</strong>: texto o <em>regex</em> <strong>sin</strong> las barras <code>/.../</code>.</li>
-            <li><strong>Flags</strong> (si regex): ej. <code>i</code> para ignorar mayúsculas/minúsculas.</li>
-            <li><strong>CSS class</strong> (opcional): usa nombres distintos si quieres estilos distintos por regla.</li>
-            <li>Elige <strong>Color de fondo</strong> y <strong>Color de texto</strong>.</li>
-            <li>Pulsa <strong>Guardar</strong>.</li>
-          </ol>
-          <p class="note"><strong>Tip:</strong> si dejas <em>CSS class</em> vacío en varias reglas, compartirán el mismo estilo y la última guardada puede sobrescribir colores de las anteriores.</p>
+          <p>Define patrones de texto o <code>/regex/i</code> para resaltar líneas del log.</p>
         </div>
 
         <div class="blt-opt-rules">
+          <div class="blt-rules-header">
+            <span>Patrón</span>
+            <span>Fondo</span>
+            <span>Texto</span>
+            <span></span>
+          </div>
           <div id="blt-rules"></div>
-          <button id="blt-addRule" class="blt-btn">Añadir regla</button>
+          <button id="blt-addRule" class="blt-btn">+ Añadir regla</button>
         </div>
 
         <div class="blt-opt-actions">
-          <button id="blt-saveRules" class="blt-btn">Guardar</button>
+          <button id="blt-saveRules" class="blt-btn blt-btn-primary">Guardar cambios</button>
           <span id="blt-opt-status" class="blt-opt-status"></span>
         </div>
       </section>
 
       <template id="blt-ruleRow">
-        <div class="rule" title="Define una regla de resaltado">
-          <input class="r-name" placeholder="Nombre (ej.: Ejecución de estrategia)" />
-          <input class="r-pattern" placeholder="Patrón (texto o \\[(ERROR|WARN)\\])" />
-          <input class="r-flags" placeholder="Flags (ej.: i)" />
-          <input class="r-class" placeholder="CSS class (ej.: hl-ejecucion)" />
+        <div class="rule">
+          <input class="r-pattern" placeholder="texto o /regex/i" />
           <input class="r-bg" type="color" value="#fff1a8" title="Color de fondo" />
           <input class="r-fg" type="color" value="#111111" title="Color de texto" />
-          <button class="r-del" title="Eliminar">🗑</button>
+          <button class="r-del" title="Eliminar regla">✕</button>
         </div>
       </template>
     `;
@@ -522,10 +536,7 @@
   function addRuleRow(r = {}) {
     const tpl = $("blt-ruleRow").content.cloneNode(true);
     const row = tpl.querySelector(".rule");
-    row.querySelector(".r-name").value = r.name || "";
     row.querySelector(".r-pattern").value = r.pattern || "";
-    row.querySelector(".r-flags").value = r.flags || "";
-    row.querySelector(".r-class").value = r.className || "";
     row.querySelector(".r-bg").value = r.bgColor || "#fff1a8";
     row.querySelector(".r-fg").value = r.textColor || "#111111";
     row.querySelector(".r-del").addEventListener("click", () => row.remove());
@@ -534,11 +545,8 @@
 
   async function saveRulesFromOptions() {
     const rows = Array.from(document.querySelectorAll("#blt-rules .rule"));
-    const rules = rows.map(row => ({
-      name: row.querySelector(".r-name").value.trim(),
+    const rules = rows.map((row, index) => ({
       pattern: row.querySelector(".r-pattern").value.trim(),
-      flags: row.querySelector(".r-flags").value.trim(),
-      className: row.querySelector(".r-class").value.trim(),
       bgColor: row.querySelector(".r-bg").value,
       textColor: row.querySelector(".r-fg").value
     })).filter(r => r.pattern);
@@ -567,12 +575,12 @@
     const style = document.createElement("style");
     style.id = "blt-dynamic-rules";
     let css = "";
-    for (const r of (rules || [])) {
-      const cls = r.className || "hl-custom";
+    rules?.forEach((r, index) => {
+      const cls = `hl-rule-${index}`;
       const bg = r.bgColor || "#fff1a8";
       const fg = r.textColor || "#111";
       css += `.${cls}{background:${bg};color:${fg};border-left:4px solid rgba(0,0,0,.2)}`;
-    }
+    });
     style.textContent = css;
     document.head.appendChild(style);
   }
