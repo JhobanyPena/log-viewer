@@ -4,7 +4,7 @@
 
   // ======= Config por defecto =======
   const DEFAULTS = {
-    refreshSeconds: 5,       // auto-refresh (segundos)
+    refreshMinutes: 5,       // auto-refresh alineado al reloj (minutos)
     followTail: true,        // seguir al final
     onlyMatches: false,      // mostrar solo coincidencias
     filterText: "",          // filtro de búsqueda (persiste)
@@ -126,6 +126,16 @@
     return out;
   }
 
+  // Calcula ms hasta el próximo tick alineado al reloj
+  function msUntilNextTick(intervalMinutes) {
+    const now = Date.now();
+    const intervalMs = intervalMinutes * 60 * 1000;
+    const next = Math.ceil(now / intervalMs) * intervalMs;
+    const delay = next - now;
+    // Si estamos justo en el tick (delay ≈ 0), programar el siguiente
+    return delay < 500 ? intervalMs : delay;
+  }
+
   // ======= UI =======
   function buildUI() {
     document.documentElement.style.height = "100%";
@@ -152,8 +162,14 @@
       <section id="blt-view" class="blt-panel is-active">
         <div class="blt-toolbar">
           <div class="blt-controls">
-            <label>Actualización (s)
-              <input id="blt-refresh" type="number" min="1" step="1" />
+            <label>Actualización (min)
+              <select id="blt-refresh">
+                <option value="1">1 min</option>
+                <option value="5">5 min</option>
+                <option value="15">15 min</option>
+                <option value="30">30 min</option>
+                <option value="60">60 min</option>
+              </select>
             </label>
             <label class="blt-checkbox">
               <input id="blt-follow" type="checkbox" /> Seguir al final
@@ -179,6 +195,7 @@
         <div class="blt-status">
           <span id="blt-bytes"></span>
           <span id="blt-last"></span>
+          <span id="blt-next-refresh"></span>
           <span id="blt-note"></span>
         </div>
       </section>
@@ -220,7 +237,7 @@
     document.body.appendChild(root);
 
     // Inicializa valores UI (VISOR)
-    $("blt-refresh").value = state.settings.refreshSeconds;
+    $("blt-refresh").value = state.settings.refreshMinutes;
     $("blt-follow").checked = state.settings.followTail;
     $("blt-only").checked = state.settings.onlyMatches;
     $("blt-filter").value = state.settings.filterText;
@@ -287,14 +304,20 @@
   async function init() {
     state.settings = await getSettings();
 
+    // Migrar configuración antigua (refreshSeconds → refreshMinutes)
+    if (state.settings.refreshSeconds && !state.settings.refreshMinutes) {
+      const allowed = [1, 5, 15, 30, 60];
+      const oldMins = Math.round(state.settings.refreshSeconds / 60);
+      state.settings.refreshMinutes = allowed.includes(oldMins) ? oldMins : 5;
+      await saveSettings({ refreshMinutes: state.settings.refreshMinutes });
+    }
+
     // 1) Aprovecha lo que ya cargó el navegador (evita segunda descarga inicial en muchos casos)
     try {
       const preloaded = (document.body && document.body.innerText) ? document.body.innerText : "";
       if (preloaded && preloaded.trim()) {
         state.buffer = preloaded;
         state.sizeBytes = textSizeBytes(preloaded);
-        // Si el server te envió ETag/Last-Modified en navegación normal, no los tenemos aquí.
-        // Igual el próximo refresh hará condicional si luego los obtenemos.
       }
     } catch {}
 
@@ -311,28 +334,47 @@
       if (!isNaN(d.getTime())) state.lastModified = d.toUTCString();
     } catch {}
 
-    // Opcional: revalidar rápido en 1s (debería ser 304)
-    setTimeout(() => refresh(false).catch(console.error), 1000);
+    // Revalidar inmediatamente al cargar (luego el timer alineado toma el relevo)
+    refresh(false).catch(console.error);
   }
 
-  // Loop con setTimeout + await: jamás se encolan refresh
+  // Loop alineado al reloj del sistema
   function startTimerLoop() {
     if (state.timerId) clearTimeout(state.timerId);
 
     const tick = async () => {
       if (!state.paused) await refresh(false).catch(console.error);
-      const ms = Math.max(1, Number(state.settings.refreshSeconds)) * 1000;
-      state.timerId = setTimeout(tick, ms);
+      const mins = Math.max(1, Number(state.settings.refreshMinutes));
+      const delay = msUntilNextTick(mins);
+      state.timerId = setTimeout(tick, delay);
+
+      // Mostrar próxima actualización en status
+      updateNextRefreshLabel(delay);
     };
 
-    const firstMs = Math.max(1, Number(state.settings.refreshSeconds)) * 1000;
-    state.timerId = setTimeout(tick, firstMs);
+    // Primera ejecución: esperar al próximo tick alineado
+    const mins = Math.max(1, Number(state.settings.refreshMinutes));
+    const firstDelay = msUntilNextTick(mins);
+    updateNextRefreshLabel(firstDelay);
+    state.timerId = setTimeout(tick, firstDelay);
+  }
+
+  function updateNextRefreshLabel(delayMs) {
+    const el = $("blt-next-refresh");
+    if (!el) return;
+    if (state.paused) {
+      el.textContent = "";
+      return;
+    }
+    const nextTime = new Date(Date.now() + delayMs);
+    el.textContent = `Próxima: ${nextTime.toLocaleTimeString()}`;
   }
 
   function onRefreshChanged(e) {
-    const v = Math.max(1, Number(e.target.value || 5));
-    state.settings.refreshSeconds = v;
-    saveSettings({ refreshSeconds: v });
+    const allowed = [1, 5, 15, 30, 60];
+    const v = allowed.includes(Number(e.target.value)) ? Number(e.target.value) : 5;
+    state.settings.refreshMinutes = v;
+    saveSettings({ refreshMinutes: v });
     startTimerLoop();
   }
   function onFollowChanged(e) {
@@ -355,6 +397,9 @@
     state.paused = !state.paused;
     $("blt-pause").textContent = state.paused ? "Reanudar" : "Pausar";
     $("blt-note").textContent = state.paused ? "⏸️ Pausado" : "";
+    const nextEl = $("blt-next-refresh");
+    if (nextEl) nextEl.textContent = state.paused ? "" : "";
+    if (!state.paused) startTimerLoop();
   }
 
   // ===== Refresh: GET condicional (ETag/Last-Modified) + sin solapes =====
