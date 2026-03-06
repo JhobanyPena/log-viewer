@@ -56,7 +56,6 @@
 }
 .blt-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .blt-controls label { font-size: 12px; color: var(--blt-muted); display: flex; align-items: center; gap: 6px; }
-.blt-controls input[type="number"] { width: 80px; padding: 4px 6px; background:#0f1522; border:1px solid #2a3448; color:var(--blt-text); border-radius:8px; }
 .blt-controls select { width: 100px; padding: 4px 6px; background:#0f1522; border:1px solid #2a3448; color:var(--blt-text); border-radius:8px; font-size: 12px; cursor: pointer; font-family: inherit; }
 .blt-controls select option { background:#0f1522; color:var(--blt-text); }
 .blt-checkbox { gap: 6px; }

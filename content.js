@@ -5,6 +5,8 @@
   // ======= Config por defecto =======
   const DEFAULTS = {
     refreshMinutes: 5,       // auto-refresh alineado al reloj (minutos)
+    refreshInitialDelay: 2,  // segundos de espera antes del refresh principal
+    refreshRetryDelay: 30,   // segundos extra para re-verificar después del tick
     followTail: true,        // seguir al final
     onlyMatches: false,      // mostrar solo coincidencias
     filterText: "",          // filtro de búsqueda (persiste)
@@ -45,6 +47,8 @@
   const state = {
     settings: { ...DEFAULTS },
     timerId: null,
+    retryTimerId: null,
+    initialDelayTimerId: null,
     buffer: "",
     paused: false,
 
@@ -341,14 +345,37 @@
   // Loop alineado al reloj del sistema
   function startTimerLoop() {
     if (state.timerId) clearTimeout(state.timerId);
+    if (state.retryTimerId) clearTimeout(state.retryTimerId);
+    if (state.initialDelayTimerId) clearTimeout(state.initialDelayTimerId);
 
-    const tick = async () => {
-      if (!state.paused) await refresh(false).catch(console.error);
+    const tick = () => {
+      if (state.paused) {
+        // Aun pausado, programa el siguiente tick
+        const mins = Math.max(1, Number(state.settings.refreshMinutes));
+        const delay = msUntilNextTick(mins);
+        state.timerId = setTimeout(tick, delay);
+        updateNextRefreshLabel(delay);
+        return;
+      }
+
+      const initialDelay = Math.max(0, Number(state.settings.refreshInitialDelay)) * 1000;
+
+      // 1) Esperar unos segundos para que el proceso escriba la primera línea
+      state.initialDelayTimerId = setTimeout(async () => {
+        await refresh(false).catch(console.error);
+
+        if (!state.paused) {
+          $("blt-note").textContent = "Esperando registros...";
+        }
+
+        // 2) Re-verificar después para capturar líneas restantes
+        scheduleRetry();
+      }, initialDelay);
+
+      // Programar próximo tick alineado
       const mins = Math.max(1, Number(state.settings.refreshMinutes));
       const delay = msUntilNextTick(mins);
       state.timerId = setTimeout(tick, delay);
-
-      // Mostrar próxima actualización en status
       updateNextRefreshLabel(delay);
     };
 
@@ -357,6 +384,19 @@
     const firstDelay = msUntilNextTick(mins);
     updateNextRefreshLabel(firstDelay);
     state.timerId = setTimeout(tick, firstDelay);
+  }
+
+  // Re-verificación: captura líneas que tardaron en escribirse
+  function scheduleRetry() {
+    if (state.retryTimerId) clearTimeout(state.retryTimerId);
+    if (state.paused) return;
+
+    const retryDelay = Math.max(10, Number(state.settings.refreshRetryDelay)) * 1000;
+    state.retryTimerId = setTimeout(async () => {
+      if (!state.paused) {
+        await refresh(false).catch(console.error);
+      }
+    }, retryDelay);
   }
 
   function updateNextRefreshLabel(delayMs) {
@@ -399,7 +439,12 @@
     $("blt-note").textContent = state.paused ? "⏸️ Pausado" : "";
     const nextEl = $("blt-next-refresh");
     if (nextEl) nextEl.textContent = state.paused ? "" : "";
-    if (!state.paused) startTimerLoop();
+    if (state.paused) {
+      if (state.retryTimerId) clearTimeout(state.retryTimerId);
+      if (state.initialDelayTimerId) clearTimeout(state.initialDelayTimerId);
+    } else {
+      startTimerLoop();
+    }
   }
 
   // ===== Refresh: GET condicional (ETag/Last-Modified) + sin solapes =====
@@ -675,7 +720,7 @@
     const hist = $("blt-history");
     if (!hist) return;
     const html = arr.map((item, idx) =>
-      `<button type="button" class="blt-history-item" data-idx="${idx}" title="Usar búsqueda">${escapeHtml(item)}</button>`
+      `<button type="button" class="blt-history-item" title="Usar búsqueda">${escapeHtml(item)}</button>`
     ).join("") + `<button type="button" class="blt-history-clear" title="Borrar historial">Limpiar historial</button>`;
     hist.innerHTML = html;
 
