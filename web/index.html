@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0b0f16" />
+  <title>Blob Log Tailer</title>
+  <link rel="stylesheet" href="app.css" />
+</head>
+<body>
+  <div id="blt-root">
+    <!-- Header -->
+    <header class="blt-header">
+      <div class="blt-left">
+        <strong class="blt-title">Blob Log Tailer</strong>
+        <div class="blt-file-selector">
+          <select id="blt-file-select" title="Seleccionar archivo de log">
+            <option value="">Cargando archivos…</option>
+          </select>
+          <button id="blt-reload-files" class="blt-btn blt-btn-icon" title="Recargar lista de archivos">⟳</button>
+        </div>
+      </div>
+      <div class="blt-tabs">
+        <button id="blt-tab-view" class="blt-tab is-active" type="button">Visor</button>
+        <button id="blt-tab-options" class="blt-tab" type="button">Opciones</button>
+      </div>
+    </header>
+
+    <!-- Panel VISOR -->
+    <section id="blt-view" class="blt-panel is-active">
+      <div class="blt-toolbar">
+        <div class="blt-controls">
+          <label>Actualización
+            <select id="blt-refresh">
+              <option value="1">1 min</option>
+              <option value="5">5 min</option>
+              <option value="15">15 min</option>
+              <option value="30">30 min</option>
+              <option value="60">60 min</option>
+            </select>
+          </label>
+          <label class="blt-checkbox">
+            <input id="blt-follow" type="checkbox" /> Seguir
+          </label>
+          <label class="blt-checkbox">
+            <input id="blt-only" type="checkbox" /> Solo coincidencias
+          </label>
+        </div>
+        <div class="blt-search">
+          <input id="blt-filter" type="text" placeholder="Filtro: texto o /regex/i" autocomplete="off" />
+          <div id="blt-history" class="blt-history" hidden></div>
+          <div class="blt-search-nav">
+            <button id="blt-prev" class="blt-btn" title="Anterior (↑)">↑</button>
+            <button id="blt-next" class="blt-btn" title="Siguiente (↓)">↓</button>
+            <span id="blt-count" class="blt-count">0 / 0</span>
+          </div>
+          <button id="blt-pause" class="blt-btn" title="Pausar/Reanudar">Pausar</button>
+        </div>
+      </div>
+
+      <div id="blt-log" class="blt-log" role="log" aria-live="polite" aria-label="Contenido del log"></div>
+
+      <div class="blt-status">
+        <span id="blt-bytes"></span>
+        <span id="blt-last"></span>
+        <span id="blt-next-refresh"></span>
+        <span id="blt-note"></span>
+      </div>
+    </section>
+
+    <!-- Panel OPCIONES -->
+    <section id="blt-options" class="blt-panel">
+      <div class="blt-opt-doc">
+        <h2>Resaltado por contenido</h2>
+        <p>Define patrones de texto o <code>/regex/i</code> para resaltar líneas del log.</p>
+      </div>
+
+      <div class="blt-opt-rules">
+        <div class="blt-rules-header">
+          <span>Patrón</span>
+          <span>Fondo</span>
+          <span>Texto</span>
+          <span></span>
+        </div>
+        <div id="blt-rules"></div>
+        <button id="blt-addRule" class="blt-btn">+ Añadir regla</button>
+      </div>
+
+      <div class="blt-opt-actions">
+        <button id="blt-saveRules" class="blt-btn blt-btn-primary">Guardar cambios</button>
+        <span id="blt-opt-status" class="blt-opt-status"></span>
+      </div>
+    </section>
+
+    <!-- Template para reglas -->
+    <template id="blt-ruleRow">
+      <div class="rule">
+        <input class="r-pattern" placeholder="texto o /regex/i" />
+        <input class="r-bg" type="color" value="#fff1a8" title="Color de fondo" />
+        <input class="r-fg" type="color" value="#111111" title="Color de texto" />
+        <button class="r-del" title="Eliminar regla">✕</button>
+      </div>
+    </template>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
